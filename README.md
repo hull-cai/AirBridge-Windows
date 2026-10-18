@@ -19,6 +19,19 @@ You **do not need MSYS2 or the .NET SDK** on the target PC for the portable buil
 
 **Status:** Experimental; the CI bundle and playback have not yet been validated on a clean Windows installation. Please report errors with app logs and Actions build results.
 
+## Cast to TV (experimental beta)
+
+The portable build adds **Find TVs**, **Cast screen**, and **Stop casting**.
+Supports discovery of **classic Chromecast** devices as well as newer Google Cast receivers via pychromecast; **Google TV is not required**.
+
+1. Launch AirBridge and start mirroring your iPhone.
+2. Maximise the iPhone mirror window on your Windows desktop.
+3. Ensure Chromecast and Windows PC are on a trusted network that allows device discovery and local HTTP traffic.
+4. Click **Find TVs**, select the Chromecast, then **Cast screen**.
+5. Click **Stop casting** to end the stream.
+
+**Beta limitations:** This first implementation casts the whole Windows desktop at up to 720p/25fps with H.264/HLS (not just the UxPlay window). iPhone audio is not relayed to the Chromecast by default. Audio routing, screen-only capture, and reducing latency are future work. Expect several seconds of delay. Older Chromecast compatibility is a goal, not a guarantee; live HLS support varies, and discovery can be blocked by guest Wi-Fi isolation. Keep the PC on a private/trusted network; the bridge hosts an unencrypted local HTTP stream accessible to devices on the LAN. This is not a way to cast DRM-protected content.
+
 ## Files
 
 - `Program.cs`: AirBridge WinForms UI and UxPlay launcher.

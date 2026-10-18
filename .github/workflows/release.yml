@@ -65,6 +65,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "GStreamer coreelements test failed" }
             & $inspect avdec_h264
             if ($LASTEXITCODE -ne 0) { throw "GStreamer H264 decoder test failed" }
+            & $inspect level
+            if ($LASTEXITCODE -ne 0) { throw "GStreamer level audio plugin test failed" }
           }
       - uses: actions/setup-python@v5
         with:

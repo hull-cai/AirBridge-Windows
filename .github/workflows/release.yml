@@ -1,4 +1,4 @@
-name: Build Windows app
+name: Build standalone Windows AirBridge
 on:
   workflow_dispatch:
   push:
@@ -13,19 +13,79 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Publish Windows app
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libplist
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-gst-libav
+      - name: Build UxPlay from official source
+        shell: msys2 {0}
+        run: |
+          git clone --depth 1 https://github.com/FDH2/UxPlay.git UxPlay
+          cmake -S UxPlay -B UxPlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build UxPlay/build --parallel 2
+          test -f UxPlay/build/uxplay.exe
+      - name: Publish self-contained Windows UI
         shell: pwsh
         run: dotnet publish AirBridge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableWindowsTargeting=true -o publish
-      - name: Archive app
+      - name: Collect portable backend dependencies
         shell: pwsh
-        run: Compress-Archive -Path publish/* -DestinationPath AirBridge-Windows-UI.zip
+        run: .\packaging\bundle-uxplay.ps1 -UxPlayExe .\UxPlay\build\uxplay.exe -MsysBin C:\msys64\ucrt64\bin -OutDir publish\backend
+      - name: Verify bundled executable starts without MSYS2 on PATH
+        shell: pwsh
+        run: |
+          $backend = (Resolve-Path publish\backend).Path
+          $env:PATH = "$backend;$env:WINDIR\System32;$env:WINDIR"
+          $env:GST_PLUGIN_SYSTEM_PATH_1_0 = ""
+          $env:GST_PLUGIN_PATH_1_0 = "$backend\gstreamer-1.0"
+          $env:GST_PLUGIN_SCANNER = "$backend\gst-plugin-scanner.exe"
+          $env:GST_REGISTRY = "$env:RUNNER_TEMP\airbridge-gst-registry.bin"
+          $p = Start-Process -FilePath "$backend\uxplay.exe" -ArgumentList '-h' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "UxPlay smoke test failed: $($p.ExitCode)" }
+          $inspect = "$backend\gst-inspect-1.0.exe"
+          if (Test-Path $inspect) {
+            & $inspect coreelements
+            if ($LASTEXITCODE -ne 0) { throw "GStreamer coreelements test failed" }
+            & $inspect avdec_h264
+            if ($LASTEXITCODE -ne 0) { throw "GStreamer H264 decoder test failed" }
+          }
+      - name: Include licence and attribution files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path publish\licenses | Out-Null
+          Copy-Item UxPlay\LICENSE* publish\licenses\ -ErrorAction SilentlyContinue
+          @'
+          AirBridge bundles UxPlay (https://github.com/FDH2/UxPlay), which is GPL-3.0 licensed.
+          UxPlay source is available at its upstream repository and is built in this workflow.
+          Additional software dependencies are from MSYS2 packages and have their own licences.
+          Read relevant package licences before redistribution; publish required corresponding source and notices.
+          '@ | Set-Content publish\licenses\THIRD-PARTY-NOTICES.txt
+      - name: Create portable ZIP
+        shell: pwsh
+        run: Compress-Archive -Path publish\* -DestinationPath AirBridge-Windows-Portable-x64.zip -CompressionLevel Optimal
       - uses: actions/upload-artifact@v4
         with:
-          name: AirBridge-Windows-UI
-          path: AirBridge-Windows-UI.zip
+          name: AirBridge-Windows-Portable-x64
+          path: AirBridge-Windows-Portable-x64.zip
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AirBridge-Windows-UI.zip
-          body: 'UI build only. UxPlay backend and runtime DLLs must be installed separately. See README.'
+          files: AirBridge-Windows-Portable-x64.zip
+          body: |
+            Experimental portable Windows x64 release with UxPlay and bundled runtime libraries.
+            Download ZIP, extract all contents, run AirBridge.exe.
+            Windows Firewall may prompt on first run. Screen mirroring requires a local network allowing device-to-device traffic.
+            Untested on a clean Windows machine; report issues.

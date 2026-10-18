@@ -31,11 +31,15 @@ jobs:
             mingw-w64-ucrt-x86_64-gst-plugins-good
             mingw-w64-ucrt-x86_64-gst-plugins-bad
             mingw-w64-ucrt-x86_64-gst-libav
+      - name: Locate MSYS2 UCRT64 runtime
+        shell: msys2 {0}
+        run: |
+          echo "UCRT_BIN=$(cygpath -w /ucrt64/bin)" >> "$GITHUB_ENV"
       - name: Build UxPlay from official source
         shell: msys2 {0}
         run: |
           git clone --depth 1 https://github.com/FDH2/UxPlay.git UxPlay
-          cmake -S UxPlay -B UxPlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S UxPlay -B UxPlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNO_MARCH_NATIVE=ON
           cmake --build UxPlay/build --parallel 2
           test -f UxPlay/build/uxplay.exe
       - name: Publish self-contained Windows UI
@@ -43,7 +47,7 @@ jobs:
         run: dotnet publish AirBridge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableWindowsTargeting=true -o publish
       - name: Collect portable backend dependencies
         shell: pwsh
-        run: .\packaging\bundle-uxplay.ps1 -UxPlayExe .\UxPlay\build\uxplay.exe -MsysBin C:\msys64\ucrt64\bin -OutDir publish\backend
+        run: .\packaging\bundle-uxplay.ps1 -UxPlayExe .\UxPlay\build\uxplay.exe -MsysBin "$env:UCRT_BIN" -OutDir publish\backend
       - name: Verify bundled executable starts without MSYS2 on PATH
         shell: pwsh
         run: |

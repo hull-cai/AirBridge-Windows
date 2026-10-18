@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
 # Curated set for AirPlay video/audio with GStreamer. We dynamically copy dependencies.
 $pluginNames = @(
  "coreelements","playback","app","typefindfunctions","autodetect",
- "audioconvert","audioresample","volume","videoconvertscale","videoconvert","videoscale","videorate",
+ "audioconvert","audioresample","volume","level","videoconvertscale","videoconvert","videoscale","videorate",
  "wasapi","wasapi2","d3d11","d3d12","directsound","directdraw","dshow",
  "libav","rtp","rtpmanager","udp","tcp","opus","audioparsers","videoparsersbad",
  "isomp4","matroska","rawparse","openh264","nice","gio","soup",
@@ -31,7 +31,7 @@ foreach ($p in $pluginNames) {
       $pluginFiles += $to
    }
 }
-foreach ($required in @("libgstcoreelements.dll","libgstplayback.dll","libgstlibav.dll")) {
+foreach ($required in @("libgstcoreelements.dll","libgstplayback.dll","libgstlibav.dll","libgstlevel.dll")) {
    if (-not (Test-Path (Join-Path $pluginOut $required))) { throw "Missing critical GStreamer plugin: $required" }
 }
 $scannerSource = Join-Path $MsysBin "..\libexec\gstreamer-1.0\gst-plugin-scanner.exe"

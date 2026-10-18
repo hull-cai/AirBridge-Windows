@@ -38,20 +38,30 @@ public sealed class ReceiverWindow : Form
     private readonly Label status = new() { Text = "● Stopped", AutoSize = true, ForeColor = Color.FromArgb(242, 167, 93), Font = new Font("Segoe UI", 11, FontStyle.Bold) };
     private readonly RichTextBox logs = new() { Dock = DockStyle.Fill, ReadOnly = true, BackColor = Color.FromArgb(17, 22, 32), ForeColor = Color.FromArgb(212, 222, 239), BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9) };
     private Process? process;
+    private Process? castProcess;
+    private readonly ComboBox castDevices = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
+    private readonly Button discoverCast = new() { Text = "Find TVs", AutoSize = true };
+    private readonly Button startCast = new() { Text = "Cast screen", AutoSize = true };
+    private readonly Button stopCast = new() { Text = "Stop casting", AutoSize = true, Enabled = false };
+    private sealed record CastTarget(string Name, string Uuid, string Model)
+    {
+        public override string ToString() => Name + " (" + Model + ")";
+    }
     private bool closing;
 
     public ReceiverWindow()
     {
         Text = "AirBridge — AirPlay for Windows";
-        Width = 780; Height = 670; MinimumSize = new Size(650, 590);
+        Width = 850; Height = 740; MinimumSize = new Size(720, 635);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(25, 31, 44); ForeColor = Color.FromArgb(237, 241, 249);
         Font = new Font("Segoe UI", 10);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 4 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 5 };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 75));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(root);
 
@@ -83,6 +93,13 @@ public sealed class ReceiverWindow : Form
         status.Margin = new Padding(20, 12, 0, 0);
         root.Controls.Add(controls, 0, 2);
 
+        var castPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, Padding = new Padding(0, 6, 0, 0) };
+        castPanel.Controls.Add(new Label { Text = "Cast to TV (beta)", AutoSize = true, Margin = new Padding(0, 9, 14, 0), Font = new Font("Segoe UI Semibold", 10) });
+        castPanel.Controls.Add(castDevices);
+        castPanel.Controls.Add(discoverCast);
+        castPanel.Controls.Add(startCast);
+        castPanel.Controls.Add(stopCast);
+        root.Controls.Add(castPanel, 0, 3);
         var logPanel = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2 };
         logPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         logPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -90,14 +107,17 @@ public sealed class ReceiverWindow : Form
         logHead.Controls.Add(new Label { Text = "Activity log", AutoSize = true, Font = new Font("Segoe UI Semibold", 11), Margin = new Padding(0, 5, 24, 0) });
         logHead.Controls.Add(clear);
         logPanel.Controls.Add(logHead, 0, 0); logPanel.Controls.Add(logs, 0, 1);
-        root.Controls.Add(logPanel, 0, 3);
+        root.Controls.Add(logPanel, 0, 4);
 
         browse.Click += (_, _) => { using var picker = new OpenFileDialog { Filter = "UxPlay (uxplay.exe)|uxplay.exe|Executable files (*.exe)|*.exe", CheckFileExists = true }; if (picker.ShowDialog(this) == DialogResult.OK) backend.Text = picker.FileName; };
         save.Click += (_, _) => SaveSettings();
         clear.Click += (_, _) => logs.Clear();
+        discoverCast.Click += async (_, _) => await DiscoverCastDevices();
+        startCast.Click += (_, _) => StartCasting();
+        stopCast.Click += (_, _) => StopCasting();
         start.Click += (_, _) => StartReceiver();
         stop.Click += (_, _) => StopReceiver();
-        FormClosing += (_, _) => { closing = true; SaveSettings(); StopReceiver(); };
+        FormClosing += (_, _) => { closing = true; SaveSettings(); StopCasting(); StopReceiver(); };
         var settingsLoaded = LoadSettings();
         backend.Text = settingsLoaded.BackendPath; name.Text = settingsLoaded.DeviceName;
         fullscreen.Checked = settingsLoaded.Fullscreen; autoStart.Checked = settingsLoaded.StartOnLaunch;
@@ -188,6 +208,84 @@ public sealed class ReceiverWindow : Form
         }
         catch (Exception ex) { SetRunning(false); Append("Failed to start: " + ex.Message); MessageBox.Show(this, ex.Message, "UxPlay error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
+    private string CastHelper => Path.Combine(AppContext.BaseDirectory, "cast", "airbridge-cast.exe");
+    private string CastFfmpeg => Path.Combine(AppContext.BaseDirectory, "cast", "ffmpeg.exe");
+
+    private async Task DiscoverCastDevices()
+    {
+        if (!File.Exists(CastHelper)) { Append("Cast helper missing. Use the complete portable build."); return; }
+        discoverCast.Enabled = false;
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                using var probe = new Process();
+                probe.StartInfo = new ProcessStartInfo(CastHelper)
+                { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+                probe.StartInfo.ArgumentList.Add("list");
+                probe.Start();
+                var output = probe.StandardOutput.ReadToEnd();
+                var error = probe.StandardError.ReadToEnd();
+                if (!probe.WaitForExit(20000)) { probe.Kill(entireProcessTree: true); throw new Exception("TV discovery timed out."); }
+                if (probe.ExitCode != 0) throw new Exception(error);
+                return JsonSerializer.Deserialize<List<CastTarget>>(output, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            });
+            castDevices.Items.Clear();
+            foreach (var item in result) castDevices.Items.Add(item);
+            if (result.Count > 0) castDevices.SelectedIndex = 0;
+            Append(result.Count == 0 ? "No Chromecast devices found." : $"Discovered {result.Count} Chromecast device(s).");
+        }
+        catch (Exception ex) { Append("Chromecast discovery failed: " + ex.Message); }
+        finally { if (!closing) discoverCast.Enabled = true; }
+    }
+
+    private void StartCasting()
+    {
+        if (castProcess is { HasExited: false }) return;
+        if (castDevices.SelectedItem is not CastTarget selected) { Append("Click Find TVs and select a Chromecast."); return; }
+        if (!File.Exists(CastHelper) || !File.Exists(CastFfmpeg)) { Append("Cast helper or FFmpeg missing."); return; }
+        var info = new ProcessStartInfo(CastHelper)
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        info.ArgumentList.Add("cast");
+        info.ArgumentList.Add("--uuid"); info.ArgumentList.Add(selected.Uuid);
+        info.ArgumentList.Add("--ffmpeg"); info.ArgumentList.Add(CastFfmpeg);
+        try
+        {
+            var p = new Process { StartInfo = info, EnableRaisingEvents = true };
+            p.OutputDataReceived += (_, e) => { if (e.Data != null) Append("Cast: " + e.Data); };
+            p.ErrorDataReceived += (_, e) => { if (e.Data != null) Append("Cast: " + e.Data); };
+            p.Exited += (_, _) =>
+            {
+                if (closing || !IsHandleCreated) return;
+                try { BeginInvoke(() =>
+                {
+                    if (ReferenceEquals(castProcess, p))
+                    {
+                        castProcess = null; startCast.Enabled = true; stopCast.Enabled = false;
+                        Append($"Casting ended (exit code {p.ExitCode}).");
+                    }
+                }); } catch (InvalidOperationException) { }
+            };
+            p.Start(); castProcess = p;
+            startCast.Enabled = false; stopCast.Enabled = true;
+            p.BeginOutputReadLine(); p.BeginErrorReadLine();
+            Append($"Casting desktop to {selected.Name}. Maximise the iPhone mirror window.");
+        }
+        catch (Exception ex) { Append("Casting failed: " + ex.Message); startCast.Enabled = true; stopCast.Enabled = false; }
+    }
+
+    private void StopCasting()
+    {
+        var p = castProcess; castProcess = null;
+        if (p != null)
+        {
+            try { if (!p.HasExited) p.Kill(entireProcessTree: true); }
+            catch (Exception ex) { Append("Stop cast warning: " + ex.Message); }
+            p.Dispose();
+        }
+        if (!closing) { startCast.Enabled = true; stopCast.Enabled = false; Append("Casting stopped."); }
+    }
+
     private void StopReceiver()
     {
         var p = process; process = null;

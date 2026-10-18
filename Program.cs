@@ -153,8 +153,15 @@ public sealed class ReceiverWindow : Form
         };
         // UxPlay built under MSYS2 UCRT64 needs runtime DLLs from ucrt64\bin.
         // Set PATH only for the child process; do not change the user's system PATH.
-        var ucrtBin = Path.Combine(AppContext.BaseDirectory, "backend");
-        if (!Directory.Exists(ucrtBin)) ucrtBin = @"C:\msys64\ucrt64\bin";
+        var portableBin = Path.Combine(AppContext.BaseDirectory, "backend");
+        var ucrtBin = File.Exists(Path.Combine(portableBin, "libgstreamer-1.0-0.dll")) ? portableBin : @"C:\msys64\ucrt64\bin";
+        if (Directory.Exists(Path.Combine(portableBin, "gstreamer-1.0")))
+        {
+            info.Environment["GST_PLUGIN_PATH_1_0"] = Path.Combine(portableBin, "gstreamer-1.0");
+            info.Environment["GST_PLUGIN_SYSTEM_PATH_1_0"] = "";
+            var scanner = Path.Combine(portableBin, "gst-plugin-scanner.exe");
+            if (File.Exists(scanner)) info.Environment["GST_PLUGIN_SCANNER"] = scanner;
+        }
         if (Directory.Exists(ucrtBin))
         {
             var existingPath = info.Environment.TryGetValue("PATH", out var value) ? value ?? "" : "";

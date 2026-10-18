@@ -2,6 +2,7 @@ name: Build standalone Windows AirBridge
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
 permissions:
   contents: write

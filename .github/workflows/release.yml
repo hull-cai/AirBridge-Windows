@@ -66,6 +66,25 @@ jobs:
             & $inspect avdec_h264
             if ($LASTEXITCODE -ne 0) { throw "GStreamer H264 decoder test failed" }
           }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Chromecast helper
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller pychromecast
+          pyinstaller --onefile --clean --name airbridge-cast cast/cast_bridge.py
+          New-Item -ItemType Directory -Force publish/cast | Out-Null
+          Copy-Item dist/airbridge-cast.exe publish/cast/
+      - name: Bundle FFmpeg H.264 desktop capture encoder
+        shell: pwsh
+        run: |
+          $archive = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath "$env:RUNNER_TEMP/airbridge-ffmpeg"
+          $exe = Get-ChildItem "$env:RUNNER_TEMP/airbridge-ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "FFmpeg binary not found in downloaded archive" }
+          Copy-Item $exe.FullName publish/cast/ffmpeg.exe
       - name: Include licence and attribution files
         shell: pwsh
         run: |
@@ -74,6 +93,8 @@ jobs:
           @'
           AirBridge bundles UxPlay (https://github.com/FDH2/UxPlay), which is GPL-3.0 licensed.
           UxPlay source is available at its upstream repository and is built in this workflow.
+          Chromecast beta uses pychromecast and FFmpeg from their upstream projects.
+          FFmpeg is downloaded from gyan.dev and may be GPL-licensed due to libx264.
           Additional software dependencies are from MSYS2 packages and have their own licences.
           Read relevant package licences before redistribution; publish required corresponding source and notices.
           '@ | Set-Content publish\licenses\THIRD-PARTY-NOTICES.txt

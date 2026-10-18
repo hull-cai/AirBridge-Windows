@@ -1,0 +1,31 @@
+name: Build Windows app
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish Windows app
+        shell: pwsh
+        run: dotnet publish AirBridge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableWindowsTargeting=true -o publish
+      - name: Archive app
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath AirBridge-Windows-UI.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirBridge-Windows-UI
+          path: AirBridge-Windows-UI.zip
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AirBridge-Windows-UI.zip
+          body: 'UI build only. UxPlay backend and runtime DLLs must be installed separately. See README.'
